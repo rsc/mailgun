@@ -45,6 +45,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"flag"
 	"fmt"
@@ -147,11 +148,12 @@ func main() {
 			mg.Die(fmt.Errorf("cannot determine From address: -f/-r not used, and $USER not set"))
 		}
 	}
+	mg.FixLocalAddr(from)
 
 	// Read message header from stdin.
 	// At the least we need to delete the BCC line (apparently).
 	// Note Header keys are as per textproto.CanonicalMIMEHeaderKey, so "Bcc" not "BCC".
-	msg, err := mail.ReadMessage(os.Stdin)
+	msg, err := mail.ReadMessage(stdinReader())
 	if err != nil {
 		mg.Die(fmt.Errorf("reading message header: %v", err))
 	}
@@ -175,8 +177,6 @@ func main() {
 	}
 	delete(msg.Header, "Bcc")
 
-	// TODO: Add Message-ID?
-
 	var hdr bytes.Buffer
 	var keys []string
 	for k := range msg.Header {
@@ -190,57 +190,46 @@ func main() {
 	}
 	fmt.Fprintf(&hdr, "\n")
 
-	body := msg.Body
-	if mg.IsTTY && !iflag {
-		body = &dotStopReader{r: body}
-	}
-	mime := io.MultiReader(&hdr, body)
-
-	mg.MailMIME(from, to, mime)
+	mg.MailMIME(from, to, io.MultiReader(&hdr, msg.Body))
 }
 
-type dotStopReader struct {
-	r     io.Reader
-	state int // how far into "\n.\n" have we seen?
-	extra [3]byte
+func stdinReader() io.Reader {
+	pr, pw := io.Pipe()
+	go func() {
+		msgCopy(pw, os.Stdin)
+		pw.Close()
+	}()
+	return pr
 }
 
-func (r *dotStopReader) Read(b []byte) (int, error) {
-	if len(b) < 4 {
-		panic("dotStopReader must read at least 4 bytes at a time")
-	}
-	if r.state == 3 {
-		return 0, io.EOF
-	}
-	copy(b, r.extra[:r.state])
-	n, err := r.r.Read(b[r.state:])
-	n += r.state
-	r.state = 0
-Loop:
-	for i, c := range b[:n] {
-		switch r.state {
-		case 0:
-			if c == '\r' || c == '\n' {
-				r.state = 1
-			}
-		case 1:
-			if c == '.' {
-				r.state = 2
-			}
-		case 2:
-			if c == '\r' || c == '\n' {
-				r.state = 3
-				n = i + 1
-				break Loop
+var nl = []byte("\n")
+
+func msgCopy(w io.Writer, r io.Reader) {
+	b := bufio.NewReaderSize(r, 64*1024)
+	hdr := true
+	for {
+		line, err := b.ReadBytes('\n')
+		if len(line) == 0 && err == io.EOF {
+			break
+		}
+		if len(line) == 0 {
+			mg.Die(fmt.Errorf("reading message: %v", err))
+		}
+		// Stop reading tty stdin at line containing only ".\n", except in -i mode.
+		if mg.IsTTY && !iflag && len(line) == 2 && line[0] == '.' && line[1] == '\n' {
+			break
+		}
+		if hdr && line[0] != ' ' && line[0] != '\t' && bytes.IndexByte(line, ':') < 0 {
+			hdr = false
+			if line[0] != '\n' {
+				// sendmail accepts a non-header line as first line of body.
+				// mail.ReadMessage wants a blank line. Give it one.
+				w.Write(nl)
 			}
 		}
+		w.Write(line)
+		if line[len(line)-1] != '\n' {
+			w.Write(nl)
+		}
 	}
-	if r.state > 0 {
-		copy(r.extra[:], b[n-r.state:])
-		n -= r.state
-	}
-	if n > 0 {
-		return n, nil
-	}
-	return 0, err
 }

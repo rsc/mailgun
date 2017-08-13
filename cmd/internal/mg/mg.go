@@ -235,6 +235,8 @@ func runPost(from *mail.Address, to []*mail.Address, endpoint, bodytype string, 
 
 	if DisableMail {
 		fmt.Fprintf(os.Stderr, "not sending mail (disabled)\n")
+		io.Copy(ioutil.Discard, body)
+		c <- 1
 		return
 	}
 
