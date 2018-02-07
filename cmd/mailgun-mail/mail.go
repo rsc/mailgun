@@ -16,7 +16,7 @@
 //	-E  discard (do not send) empty messages
 //	-d  print debugging information
 //	-n  do not send any mail
-//	-t  use Subject:, To:, Cc:, Bcc: lines from input
+//	-t  use From:, Subject:, To:, Cc:, Bcc: lines from input
 //	-v  verbose mode
 //
 //	-a file
@@ -76,14 +76,14 @@ var (
 func main() {
 	mg.Init()
 
-	var to, cc, bcc mg.AddrListFlag
+	var to, cc, bcc, froms mg.AddrListFlag
 	var aflag, rflag, sflag mg.StringListFlag
 	var body bytes.Buffer
 
 	flag.BoolVar(&Eflag, "E", false, "discard (do not send) empty messages")
 	flag.BoolVar(&dflag, "d", false, "print debugging information")
 	flag.BoolVar(&nflag, "n", false, "do not send actual mail")
-	flag.BoolVar(&tflag, "t", false, "read To:, CC:, and BCC: lines from message header")
+	flag.BoolVar(&tflag, "t", false, "use From:, Subject:, To:, Cc:, and Bcc: lines from message header")
 	flag.BoolVar(&vflag, "v", false, "verbose mode")
 
 	flag.Var(&aflag, "a", "attach `file` to message")
@@ -118,7 +118,7 @@ func main() {
 		from = a
 	} else {
 		from.Address = os.Getenv("USER")
-		if from.Address == "" {
+		if from.Address == "" && !tflag {
 			mg.Die(fmt.Errorf("cannot determine From address: -r not used, and $USER not set"))
 		}
 	}
@@ -141,7 +141,7 @@ func main() {
 		subject = strings.TrimSuffix(string(line), "\n")
 	}
 
-	// Subject, To, CC, BCC from input using -t.
+	// From, Subject, To, CC, BCC from input using -t.
 	if tflag {
 		for {
 			line, err := b.ReadBytes('\n')
@@ -167,6 +167,8 @@ func main() {
 			switch strings.ToLower(key) {
 			default:
 				fmt.Fprintf(os.Stderr, "mailgun-mail: ignoring header field %q\n", strings.TrimSuffix(string(line), "\n"))
+			case "from":
+				list = &froms
 			case "subject":
 				subject = val
 				continue
@@ -183,9 +185,13 @@ func main() {
 
 			addrs, err := mail.ParseAddressList(val)
 			if err != nil {
-				mg.Die(fmt.Errorf("cannot parse %s: list: %v", key, err))
+				mg.Die(fmt.Errorf("cannot parse %s: list: %v [%q]", key, err, val))
 			}
 			*list = append(*list, addrs...)
+		}
+
+		if from.Address == "" {
+			mg.Die(fmt.Errorf("cannot determine From address: -r not used, $USER not set, and no From: line in -t message"))
 		}
 	}
 
