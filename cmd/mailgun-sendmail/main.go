@@ -103,7 +103,7 @@ func main() {
 	flag.StringVar(&fflag, "f", "", "set the `from` address of the mail")
 	flag.BoolVar(&iflag, "i", false, "ignore single dot lines on incoming message")
 	flag.StringVar(&fflag, "r", "", "archaic alias for -f")
-	flag.BoolVar(&tflag, "t", false, "read To:, Cc:, Bcc: lines from message")
+	flag.BoolVar(&tflag, "t", false, "read From:, To:, Cc:, Bcc: lines from message")
 	// flag.Bool("U", false, "ignored (initial user submission)")
 	// flag.String("V", "", "set the envelope `id`")
 	flag.BoolVar(&vflag, "v", false, "verbose mode")
@@ -144,7 +144,7 @@ func main() {
 		from.Address = fflag
 	} else {
 		from.Address = os.Getenv("USER")
-		if from.Address == "" {
+		if from.Address == "" && !tflag {
 			mg.Die(fmt.Errorf("cannot determine From address: -f/-r not used, and $USER not set"))
 		}
 	}
@@ -158,18 +158,25 @@ func main() {
 		mg.Die(fmt.Errorf("reading message header: %v", err))
 	}
 	if tflag {
-		for _, key := range []string{"To", "Cc", "Bcc"} {
+		for _, key := range []string{"From", "To", "Cc", "Bcc"} {
 			if len(msg.Header[key]) == 0 {
 				continue
 			}
 			addrs, err := msg.Header.AddressList(key)
 			if err != nil {
-				mg.Die(fmt.Errorf("cannot parse %s: list: %v", key, err))
+				mg.Die(fmt.Errorf("cannot parse %s: list: %v [%q]", key, err, msg.Header[key]))
+			}
+			if key == "From" && len(addrs) > 0 {
+				*from = *addrs[0]
+				continue
 			}
 			to = append(to, addrs...)
 		}
 		if len(to) == 0 {
 			mg.Die(fmt.Errorf("no recipients found in message"))
+		}
+		if from.Address == "" {
+			mg.Die(fmt.Errorf("cannot determine From address: -f/-r not used, $USER not set, and no From: line in -t message"))
 		}
 	}
 	if len(msg.Header["From"]) == 0 {
