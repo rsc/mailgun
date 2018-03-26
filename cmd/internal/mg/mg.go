@@ -86,6 +86,13 @@ func ParseAddress(addr string) (*mail.Address, error) {
 	if !strings.ContainsAny(addr, "<>()\" \t\r\n") {
 		return &mail.Address{Address: addr}, nil
 	}
+	if strings.HasSuffix(addr, ">") && !strings.HasPrefix(addr, `"`) {
+		// Foo (Bar) <baz@quux.com>
+		// not handled "correctly" by ParseAddress.
+		if i := strings.LastIndex(addr, "<"); i >= 0 {
+			return &mail.Address{Name: strings.TrimSpace(addr[:i]), Address: addr[i:len(addr)-1]}, nil
+		}
+	}
 	return mail.ParseAddress(addr)
 
 }
