@@ -107,6 +107,7 @@ func main() {
 	// flag.Bool("U", false, "ignored (initial user submission)")
 	// flag.String("V", "", "set the envelope `id`")
 	flag.BoolVar(&vflag, "v", false, "verbose mode")
+	flag.StringVar(new(string), "o", "", "set option (ignored)")
 	// flag.Var(&Oflag, "O", "", "set `option=value`")
 
 	flag.Usage = usage
